@@ -27,24 +27,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a65b545ab31d687cff52899d4890855fec459eb6afe0da6417b8a18da87aa29"
 
 [[package]]
-name = "blog_os"
-version = "0.1.0"
-dependencies = [
- "bootloader",
- "conquer-once",
- "crossbeam-queue",
- "futures-util",
- "lazy_static",
- "linked_list_allocator",
- "pc-keyboard",
- "pic8259",
- "spin 0.5.2",
- "uart_16550",
- "volatile 0.2.7",
- "x86_64",
-]
-
-[[package]]
 name = "bootloader"
 version = "0.9.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -130,6 +112,24 @@ checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
+]
+
+[[package]]
+name = "noos"
+version = "0.1.0"
+dependencies = [
+ "bootloader",
+ "conquer-once",
+ "crossbeam-queue",
+ "futures-util",
+ "lazy_static",
+ "linked_list_allocator",
+ "pc-keyboard",
+ "pic8259",
+ "spin 0.5.2",
+ "uart_16550",
+ "volatile 0.2.7",
+ "x86_64",
 ]
 
 [[package]]
