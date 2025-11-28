@@ -2,6 +2,7 @@ use core::fmt;
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
+use x86_64::instructions::interrupts;
 
 lazy_static! {
     /// A global `Writer` instance that can be used for printing to the VGA text buffer.
@@ -141,6 +142,11 @@ impl Writer {
             self.buffer.chars[row][col].write(blank);
         }
     }
+    fn clear_screen(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+    }
 }
 
 impl fmt::Write for Writer {
@@ -200,5 +206,10 @@ fn test_println_output() {
             let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 2][i].read();
             assert_eq!(char::from(screen_char.ascii_character), c);
         }
+    });
+}
+pub fn clear_screen() {
+    interrupts::without_interrupts(|| {
+        WRITER.lock().clear_screen();
     });
 }
