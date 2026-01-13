@@ -8,8 +8,10 @@ extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
-use noos::println;
-use noos::task::{Task, executor::Executor, keyboard};
+use noos::{
+    println,
+    task::cpu_funcs::{current_stack_ptr, get_core_ids, get_cpu_data, init_cpu_data},
+};
 
 entry_point!(kernel_main);
 
@@ -26,13 +28,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
-
+    init_cpu_data(unsafe { current_stack_ptr() as *mut u8 }); // get the current stack pointer for the boot core
     #[cfg(test)]
     test_main();
-
-    let mut executor = Executor::new();
-    executor.spawn(Task::new(example_task()));
-    executor.spawn(Task::new(keyboard::print_keypresses()));
+    let executor = unsafe { &mut *get_cpu_data().executor };
     executor.run();
 }
 
@@ -48,15 +47,6 @@ fn panic(info: &PanicInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     noos::test_panic_handler(info)
-}
-
-async fn async_number() -> u32 {
-    42
-}
-
-async fn example_task() {
-    let number = async_number().await;
-    println!("async number: {}", number);
 }
 
 #[test_case]

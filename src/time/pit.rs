@@ -7,12 +7,13 @@ const PIT_BASE_HZ: u32 = 1_193_182;
 const TIMER_HZ: u32 = 100; // 10ms granularity
 /// Initialize the PIT to fire interrupts at 'TIMER_HZ' frequency
 pub fn init() {
-    let divisor = (PIT_BASE_HZ / TIMER_HZ) as u8;
+    let divisor: u16 = (PIT_BASE_HZ / TIMER_HZ) as u16;
     unsafe {
         let mut cmd = Port::new(PIT_COMMAND);
-        cmd.write(0x36 as u8); // select counter 0
+        cmd.write(0x36 as u8); // channel 0, lobyte/hibyte, mode 3, binary
+
         let mut channel0 = Port::new(PIT_CHANNEL0);
-        channel0.write(divisor as u8);
-        channel0.write((divisor >> 8) as u8);
+        channel0.write((divisor & 0xFF) as u8); // low byte
+        channel0.write((divisor >> 8) as u8); // high byte
     }
 }

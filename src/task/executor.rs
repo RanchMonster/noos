@@ -1,102 +1,54 @@
-use super::{Task, TaskId};
-use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
-use core::task::{Context, Poll, Waker};
-use crossbeam_queue::ArrayQueue;
+use alloc::{boxed::Box, vec::Vec};
+use spin::{Mutex, MutexGuard, RwLock};
 
-pub struct Executor {
-    tasks: BTreeMap<TaskId, Task>,
-    task_queue: Arc<ArrayQueue<TaskId>>,
-    waker_cache: BTreeMap<TaskId, Waker>,
+use crate::task::{TaskStack, cpu_funcs::get_cpu_data, switch_to_task_context};
+
+use super::Task;
+lazy_static::lazy_static! {
+    static ref GLOBAL_QUEUE: Mutex<Vec<Box<Task>>> = Mutex::new(Vec::new());
 }
-
+pub struct Executor {
+    tasks: RwLock<Vec<Box<Task>>>,
+    current_task: Mutex<Option<Box<Task>>>,
+}
 impl Executor {
     pub fn new() -> Self {
         Executor {
-            tasks: BTreeMap::new(),
-            task_queue: Arc::new(ArrayQueue::new(100)),
-            waker_cache: BTreeMap::new(),
+            tasks: RwLock::new(Vec::new()),
+            current_task: Mutex::new(None),
         }
     }
-
-    pub fn spawn(&mut self, task: Task) {
-        let task_id = task.id;
-        if self.tasks.insert(task.id, task).is_some() {
-            panic!("task with same ID already in tasks");
+    pub fn next_task(&self) -> Option<Box<Task>> {
+        if let Some(task) = self.tasks.write().pop() {
+            Some(task)
+        } else {
+            GLOBAL_QUEUE.lock().pop()
         }
-        self.task_queue.push(task_id).expect("queue full");
     }
-
-    pub fn run(&mut self) -> ! {
+    pub fn current_task<'a>(&'a self) -> MutexGuard<'a, Option<Box<Task>>> {
+        self.current_task.lock()
+    }
+    pub fn spawn(&self, func: Box<dyn FnOnce()>) {
+        let task = Task::new(func, TaskStack::new());
+        GLOBAL_QUEUE.lock().push(task);
+    }
+    pub fn bound_spawn(&self, func: Box<dyn FnOnce()>) {
+        let core_id = unsafe { get_cpu_data().core_id };
+        let task = Task::new_with_core(func, TaskStack::new(), core_id as usize);
+        self.tasks.write().push(task);
+    }
+    pub fn run(&self) -> ! {
         loop {
-            self.run_ready_tasks();
-            self.sleep_if_idle();
-        }
-    }
-
-    fn run_ready_tasks(&mut self) {
-        // destructure `self` to avoid borrow checker errors
-        let Self {
-            tasks,
-            task_queue,
-            waker_cache,
-        } = self;
-
-        while let Some(task_id) = task_queue.pop() {
-            let task = match tasks.get_mut(&task_id) {
-                Some(task) => task,
-                None => continue, // task no longer exists
-            };
-            let waker = waker_cache
-                .entry(task_id)
-                .or_insert_with(|| TaskWaker::new(task_id, task_queue.clone()));
-            let mut context = Context::from_waker(waker);
-            match task.poll(&mut context) {
-                Poll::Ready(()) => {
-                    // task done -> remove it and its cached waker
-                    tasks.remove(&task_id);
-                    waker_cache.remove(&task_id);
+            if let Some(task) = self.next_task() {
+                // if there is a current task, switch from it to the new task
+                if let Some(mut current_task) = self.current_task.lock().take() {
+                    switch_to_task_context(&mut current_task.task_context, &task.task_context);
+                } else {
+                    // if there is no current task, switch to the new task
+                    let kernel_ctx = unsafe { &mut *get_cpu_data().kernel_ctx };
+                    switch_to_task_context(kernel_ctx, &task.task_context);
                 }
-                Poll::Pending => {}
             }
         }
-    }
-
-    fn sleep_if_idle(&self) {
-        use x86_64::instructions::interrupts::{self, enable_and_hlt};
-
-        interrupts::disable();
-        if self.task_queue.is_empty() {
-            enable_and_hlt();
-        } else {
-            interrupts::enable();
-        }
-    }
-}
-
-struct TaskWaker {
-    task_id: TaskId,
-    task_queue: Arc<ArrayQueue<TaskId>>,
-}
-
-impl TaskWaker {
-    fn new(task_id: TaskId, task_queue: Arc<ArrayQueue<TaskId>>) -> Waker {
-        Waker::from(Arc::new(TaskWaker {
-            task_id,
-            task_queue,
-        }))
-    }
-
-    fn wake_task(&self) {
-        self.task_queue.push(self.task_id).expect("task_queue full");
-    }
-}
-
-impl Wake for TaskWaker {
-    fn wake(self: Arc<Self>) {
-        self.wake_task();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.wake_task();
     }
 }
