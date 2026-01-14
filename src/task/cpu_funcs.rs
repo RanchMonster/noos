@@ -82,22 +82,7 @@ unsafe fn send_sipi(apic_id: u8, vector: u8) {
     lapic_write(0x310, (apic_id as u32) << 24); // target APIC ID
     lapic_write(0x300, 0x4600 | (vector as u32)); // SIPI, level=assert, vector
 }
-/// fetch core ids from CPUID
-pub fn get_core_ids() -> Vec<u32> {
-    let mut ids = Vec::new();
-    let mut level = 0;
-    loop {
-        let cpuid = unsafe { __cpuid_count(0x0B, level) };
-        let level_type = (cpuid.ecx >> 8) & 0xFF;
-        let x2apic_id = cpuid.edx;
-        if level_type == 0 {
-            break;
-        }
-        ids.push(x2apic_id);
-        level += 1;
-    }
-    ids
-}
+
 #[inline(always)]
 /// Get the current stack pointer from (RSP)
 /// This is unsafe because it is not guaranteed that the current stack pointer is valid and is not
