@@ -6,12 +6,10 @@
 
 extern crate alloc;
 
-use bootloader::{BootInfo, entry_point};
+use alloc::vec::Vec;
+use bootloader::{BootInfo, bootinfo::MemoryRegionType, entry_point};
 use core::panic::PanicInfo;
-use noos::{
-    println,
-    task::cpu_funcs::{current_stack_ptr, get_core_ids, get_cpu_data, init_cpu_data},
-};
+use noos::println;
 
 entry_point!(kernel_main);
 
@@ -26,13 +24,18 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
-
-    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
-    init_cpu_data(unsafe { current_stack_ptr() as *mut u8 }); // get the current stack pointer for the boot core
+    let mut heap_size: usize = 0;
+    for frame in boot_info.memory_map.iter() {
+        if frame.region_type == MemoryRegionType::Usable {
+            heap_size += (frame.range.end_addr() - frame.range.start_addr()) as usize;
+        }
+    }
+    println!("heap size: {}", heap_size);
+    allocator::init_heap(&mut mapper, &mut frame_allocator, heap_size)
+        .expect("heap initialization failed");
     #[cfg(test)]
     test_main();
-    let executor = unsafe { &mut *get_cpu_data().executor };
-    executor.run();
+    loop {}
 }
 
 /// This function is called on panic.
