@@ -15,7 +15,7 @@ build-image: build
 # Run in QEMU (with default args)
 run: build-image
     qemu-system-x86_64 \
-        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.img \
+        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.bin \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -serial stdio \
         -display none
@@ -23,18 +23,18 @@ run: build-image
 # Run with graphics (useful for debugging)
 run-display: build-image
     qemu-system-x86_64 \
-        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.img
+        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.bin
 
 # Run with custom QEMU args - usage: just run-custom "-m 512 -smp 2"
 run-custom ARGS: build-image
     qemu-system-x86_64 \
-        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.img \
+        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.bin \
         {{ARGS}}
 
 # Run tests in QEMU
 test: build-image
     qemu-system-x86_64 \
-        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.img \
+        -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.bin \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -serial stdio \
         -display none
