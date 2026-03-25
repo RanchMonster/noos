@@ -7,9 +7,8 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
-use bootloader::{BootInfo, entry_point};
+use bootloader::{BootInfo, bootinfo::MemoryRegionType, entry_point};
 use core::panic::PanicInfo;
-use noos::allocator::HEAP_SIZE;
 
 entry_point!(main);
 
@@ -22,7 +21,14 @@ fn main(boot_info: &'static BootInfo) -> ! {
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
-    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    let mut heap_size: usize = 0;
+    for frame in boot_info.memory_map.iter() {
+        if frame.region_type == MemoryRegionType::Usable {
+            heap_size += (frame.range.end_addr() - frame.range.start_addr()) as usize;
+        }
+    }
+    allocator::init_heap(&mut mapper, &mut frame_allocator, heap_size)
+        .expect("heap initialization failed");
 
     test_main();
     loop {}
