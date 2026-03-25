@@ -1,11 +1,15 @@
-use core::arch::{asm, naked_asm, x86_64::__cpuid_count};
+use core::arch::{asm, global_asm, naked_asm, x86_64::__cpuid_count};
 
 use alloc::{boxed::Box, vec::Vec};
+use x86_64::instructions::hlt;
 
-use crate::task::{TaskContext, executor::Executor};
+use crate::{
+    println, serial_println,
+    task::{TaskContext, executor::Executor},
+};
 use core::ptr::write_volatile;
 const LAPIC_BASE: usize = 0xFEE00000;
-
+global_asm!(include_str!("trampoline.s"));
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct CpuData {
@@ -98,6 +102,19 @@ pub unsafe fn current_stack_ptr() -> usize {
     }
     rsp
 }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ap_main() {
+    unsafe {
+        lapic_write(0xF0, 0x1FF);
+        lapic_write(0x80, 0x10000);
+        asm!("sti");
+    }
+    #[cfg(test)]
+    serial_println!("Other CPU booted");
+    #[cfg(not(test))]
+    println!("Other CPU booted");
+    hlt();
+}
 /// init the cpu data
 pub fn init_cpu_data(stack: *mut u8) {
     let cpuid = unsafe { get_core_id_from_cpuid() };
@@ -112,4 +129,23 @@ pub fn init_cpu_data(stack: *mut u8) {
         switched: false,
     }));
     unsafe { set_gs_base(cpu_data as usize) };
+}
+#[cfg(test)]
+pub fn test_core_init() {
+    // init one other core
+    unsafe { 
+        send_init_ipi(1);
+        // Wait 10ms after INIT
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
+        // Send SIPI with vector 0x08 (trampoline at 0x8000)
+        send_sipi(1, 0x08);
+        // Wait 200us
+        for _ in 0..2000 {
+            core::hint::spin_loop();
+        }
+        // Send second SIPI (as per Intel spec)
+        send_sipi(1, 0x08);
+    }
 }
