@@ -1,4 +1,4 @@
-use crate::{gdt, hlt_loop, print, println};
+use crate::{gdt, hlt_loop, print, println, serial_println};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
@@ -61,6 +61,10 @@ extern "x86-interrupt" fn page_fault_handler(
     println!("Accessed Address: {:?}", Cr2::read());
     println!("Error Code: {:?}", error_code);
     println!("{:#?}", stack_frame);
+    serial_println!("EXCEPTION: PAGE FAULT");
+    serial_println!("Accessed Address: {:?}", Cr2::read());
+    serial_println!("Error Code: {:?}", error_code);
+    serial_println!("{:#?}", stack_frame);
     hlt_loop();
 }
 
