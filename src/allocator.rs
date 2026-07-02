@@ -11,9 +11,8 @@ use x86_64::{
 pub mod bump;
 pub mod fixed_size_block;
 pub mod linked_list;
-
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-
+pub const KERNEL_HEAP_END: usize = 0x_4444_4444_0000;
 #[global_allocator]
 static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());
 
@@ -37,8 +36,14 @@ pub fn init_heap(
             .ok_or(MapToError::FrameAllocationFailed)?;
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
         unsafe { mapper.map_to(page, frame, flags, frame_allocator)?.flush() };
+        let page_mapped_to_frame = mapper.translate_page(page).expect("page not mapped");
+        assert_eq!(
+            page_mapped_to_frame,
+            frame,
+            "page not mapped to expected frame instead mapped to {}",
+            page_mapped_to_frame.start_address().as_u64()
+        );
     }
-
     unsafe {
         ALLOCATOR.lock().init(HEAP_START, heap_size);
     }
