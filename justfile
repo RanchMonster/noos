@@ -15,6 +15,7 @@ build-image: build
 # Run in QEMU (with default args)
 run: build-image
    qemu-system-x86_64 \
+      -enable-kvm \
       -drive format=raw,file=target/x87_64-blog_os/debug/bootimage-noos.bin \
       -device isa-debug-exit\
       -serial stdio \
@@ -23,6 +24,7 @@ run: build-image
 # Run with graphics (useful for debugging)
 run-display: build-image
    qemu-system-x86_64 \
+      -enable-kvm \
       -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-noos.bin \
       -device isa-debug-exit \
       -serial stdio \

@@ -130,10 +130,11 @@ pub fn init_cpu_data(stack: *mut u8) {
     }));
     unsafe { set_gs_base(cpu_data as usize) };
 }
+
 #[cfg(test)]
 pub fn test_core_init() {
     // init one other core
-    unsafe { 
+    unsafe {
         send_init_ipi(1);
         // Wait 10ms after INIT
         for _ in 0..10000 {

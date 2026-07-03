@@ -4,7 +4,7 @@ const PIT_CHANNEL0: u16 = 0x40;
 const PIT_COMMAND: u16 = 0x43;
 /// Base frequency of the PIT crystal
 const PIT_BASE_HZ: u32 = 1_193_182;
-const TIMER_HZ: u32 = 100; // 10ms granularity
+const TIMER_HZ: u32 = 1000; // Timer frequency
 /// Initialize the PIT to fire interrupts at 'TIMER_HZ' frequency
 pub fn init() {
     let divisor: u16 = (PIT_BASE_HZ / TIMER_HZ) as u16;

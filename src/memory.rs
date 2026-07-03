@@ -6,7 +6,7 @@ use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{
         FrameAllocator, FrameDeallocator, MappedPageTable, Mapper, OffsetPageTable, Page, PageSize,
-        PageTable, PageTableFlags, PhysFrame, Size4KiB, mapper,
+        PageTable, PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, mapper,
     },
 };
 
@@ -165,6 +165,63 @@ impl BitMapFrameAllocator {
             next_search_word: total_used_frames / 64,
         }
     }
+
+    /// Helper: Checks if a sequential range of bits in the bitmap is entirely 0 (free)
+    fn is_region_free(&self, start_frame: usize, count: usize) -> bool {
+        let end_frame = start_frame + count;
+
+        for frame in start_frame..end_frame {
+            let word_idx = frame / 64;
+            let bit_idx = frame % 64;
+
+            // Guard: Array bounds check safety
+            assert!(word_idx < self.bitmap.len());
+
+            // If any bit is set (1), the block is not free
+            let is_allocated = (self.bitmap[word_idx] & (1 << bit_idx)) != 0;
+            if is_allocated {
+                return false;
+            }
+        }
+
+        true
+    }
+    fn is_region_used(&self, start_frame: usize, count: usize) -> bool {
+        !self.is_region_free(start_frame, count)
+    }
+
+    /// Helper: Flips a sequential range of bits from 0 to 1 (allocated)
+    fn mark_region_allocated(&mut self, start_frame: usize, count: usize) {
+        debug_assert!(
+            self.is_region_free(start_frame, count),
+            "Allocated region overlaps with free region"
+        ); // if I use this right, this should never happen (but just in case it doing a assertion
+        // in debug mode)
+        let end_frame = start_frame + count;
+
+        for frame in start_frame..end_frame {
+            let word_idx = frame / 64;
+            let bit_idx = frame % 64;
+
+            // Use bitwise OR to set the specific target bit to 1
+            self.bitmap[word_idx] |= 1 << bit_idx;
+        }
+    }
+    fn mark_region_free(&mut self, start_frame: usize, count: usize) {
+        debug_assert!(
+            self.is_region_used(start_frame, count),
+            "Free region overlaps with allocated region"
+        ); // if I use this right, this should never happen (but just in case it doing a assertion
+        // in debug mode)
+        let end_frame = start_frame + count;
+        for frame in start_frame..end_frame {
+            let word_idx = frame / 64;
+            let bit_idx = frame % 64;
+
+            // Use bitwise AND to set the specific target bit to 0
+            self.bitmap[word_idx] &= !(1 << bit_idx);
+        }
+    }
 }
 unsafe impl FrameAllocator<Size4KiB> for BitMapFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
@@ -174,7 +231,7 @@ unsafe impl FrameAllocator<Size4KiB> for BitMapFrameAllocator {
             if word == u64::MAX {
                 continue;
             }
-            // Free frames have bit = 0. trailing_zeros finds the first 0 bit.
+            // Free frames have bit = 0. trailing_zeros finds the first 0 bit on the right.
             let bit = (!word).trailing_zeros();
             let bit = bit as usize;
 
@@ -202,5 +259,58 @@ impl FrameDeallocator<Size4KiB> for BitMapFrameAllocator {
         self.bitmap[word_index] &= !(1 << bit_index);
         // Optionally rewind next_search_word so this frame gets reused
         self.next_search_word = self.next_search_word.min(word_index);
+    }
+}
+unsafe impl FrameAllocator<Size2MiB> for BitMapFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size2MiB>> {
+        for word_idx in self.next_search_word..self.bitmap.len() {
+            let word = self.bitmap[word_idx];
+
+            // Guard: Skip fully allocated words immediately
+            if word == u64::MAX {
+                continue;
+            }
+
+            // Find the first free bit index (0 to 63)
+            let bit = (!word).trailing_zeros() as usize;
+            let start_frame = word_idx * 64 + bit;
+
+            // Guard: 2 MiB frames must start at a 512-aligned boundary
+            if start_frame % 512 != 0 {
+                continue;
+            }
+
+            // Guard: Ensure all 512 bits starting here are completely free
+            let out_of_bounds = word_idx >= self.bitmap.len();
+            if out_of_bounds || !self.is_region_free(start_frame, 512) {
+                continue;
+            }
+
+            // If we passed all guards, perform allocation and return
+            self.mark_region_allocated(start_frame, 512);
+            self.next_search_word = (start_frame + 512) / 64;
+
+            let phys_addr = PhysAddr::new((start_frame * 4096) as u64);
+            return Some(PhysFrame::containing_address(phys_addr));
+        }
+
+        None
+    }
+}
+impl FrameDeallocator<Size2MiB> for BitMapFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size2MiB>) {
+        let frame_index = (frame.start_address().as_u64() / 4096) as usize;
+        self.mark_region_free(frame_index, 512);
+    }
+}
+unsafe impl FrameAllocator<Size1GiB> for BitMapFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size1GiB>> {
+        unimplemented!("1GiB allocation not implemented")
+    }
+}
+
+impl FrameDeallocator<Size1GiB> for BitMapFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size1GiB>) {
+        unimplemented!("1GiB deallocation not implemented")
     }
 }
