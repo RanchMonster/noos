@@ -12,18 +12,18 @@ pub mod bump;
 pub mod fixed_size_block;
 pub mod linked_list;
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-
+pub const KERNEL_HEAP_START_SIZE: usize = 4096; // allocate 1 Frame for the heap
+// use other allocators later as needed
 #[global_allocator]
 static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());
 
 pub fn init_heap(
     mapper: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-    heap_size: usize,
 ) -> Result<(), MapToError<Size4KiB>> {
     let page_range = {
         let heap_start = VirtAddr::new(HEAP_START as u64);
-        let heap_end = heap_start + heap_size - 1u64;
+        let heap_end = heap_start + KERNEL_HEAP_START_SIZE as u64 - 1u64;
         let heap_start_page = Page::containing_address(heap_start);
         let heap_end_page = Page::containing_address(heap_end);
 
@@ -45,7 +45,7 @@ pub fn init_heap(
         );
     }
     unsafe {
-        ALLOCATOR.lock().init(HEAP_START, heap_size);
+        ALLOCATOR.lock().init(HEAP_START, KERNEL_HEAP_START_SIZE);
     }
 
     Ok(())

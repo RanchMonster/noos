@@ -4,7 +4,7 @@ use alloc::{boxed::Box, vec::Vec};
 use x86_64::instructions::hlt;
 
 use crate::{
-    println, serial_println,
+    println,
     task::{TaskContext, executor::Executor},
 };
 use core::ptr::write_volatile;
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn ap_main() {
         asm!("sti");
     }
     #[cfg(test)]
-    serial_println!("Other CPU booted");
+    println!("Other CPU booted");
     #[cfg(not(test))]
     println!("Other CPU booted");
     hlt();
