@@ -16,12 +16,18 @@ pub mod serial;
 pub mod task;
 pub mod time;
 pub mod vga;
+/// Initialize the necessary hardware and componentes for the kernel to run.
 pub fn init() {
+    time::init();
     gdt::init();
     interrupts::init_idt();
-    unsafe { interrupts::PICS.lock().initialize() };
+    unsafe {
+        let mut pic = interrupts::PICS.lock();
+        pic.initialize();
+        // override the ovmf masked interrupts for uefi
+        pic.write_masks(0b1111_1000, 0xFF);
+    }
     x86_64::instructions::interrupts::enable();
-    time::init();
 }
 pub trait Testable {
     fn run(&self) -> ();
