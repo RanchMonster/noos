@@ -1,6 +1,6 @@
 use core::sync::atomic::AtomicU64;
 
-use x86_64::instructions::{interrupts::without_interrupts, port::Port};
+use x86_64::instructions::port::Port;
 /// I/O port for the Programmable Interrupt Timer (PIT)
 const PIT_CHANNEL0: u16 = 0x40;
 const PIT_COMMAND: u16 = 0x43;
@@ -14,7 +14,7 @@ pub fn init() {
     let divisor: u16 = (PIT_BASE_HZ / TIMER_HZ) as u16;
     unsafe {
         let mut cmd = Port::new(PIT_COMMAND);
-        cmd.write(0x36 as u8); // channel 0, lobyte/hibyte, mode 3, binary
+        cmd.write(0x36_u8); // channel 0, lobyte/hibyte, mode 3, binary
 
         let mut channel0 = Port::new(PIT_CHANNEL0);
         channel0.write((divisor & 0xFF) as u8); // low byte

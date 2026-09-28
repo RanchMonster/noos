@@ -6,16 +6,12 @@
 
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
 use bootloader_api::{
     BootInfo, BootloaderConfig,
-    config::{Mapping, Mappings},
     entry_point,
-    info::{FrameBuffer, MemoryRegionKind},
 };
-use core::{arch::asm, panic::PanicInfo};
-use kernel::{memory::BitMapFrameAllocator, println, vga};
-use x86_64::structures::paging::{PageSize, Size1GiB, Size2MiB, Translate};
+use core::panic::PanicInfo;
+use kernel::{memory::BitMapFrameAllocator, println};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
@@ -35,14 +31,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .take()
         .expect("Physical memory offset not found");
     let mut offset_page_tabe =
-        unsafe { memory::init(VirtAddr::new(physical_memory_offset as u64)) };
+        unsafe { memory::init(VirtAddr::new(physical_memory_offset)) };
     let boot_info_frame_allocator =
         unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     let mut bitmap_frame_allocator =
         BitMapFrameAllocator::new(&mut offset_page_tabe, boot_info_frame_allocator);
     allocator::init_heap(&mut offset_page_tabe, &mut bitmap_frame_allocator)
         .expect("failed to initialize heap");
-    let mut vga_buffer = boot_info.framebuffer.take().expect("no framebuffer");
+    let _vga_buffer = boot_info.framebuffer.take().expect("no framebuffer");
 
     #[cfg(test)]
     test_main();

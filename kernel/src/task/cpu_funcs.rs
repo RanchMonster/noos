@@ -1,6 +1,6 @@
-use core::arch::{asm, global_asm, naked_asm, x86_64::__cpuid_count};
+use core::arch::{asm, global_asm, naked_asm};
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
 use x86_64::instructions::hlt;
 
 use crate::{
@@ -74,18 +74,18 @@ unsafe fn lapic_write(offset: usize, value: u32) {
     unsafe { write_volatile(reg, value) };
 }
 /// Send INIT IPI to an AP
-unsafe fn send_init_ipi(apic_id: u8) {
+unsafe fn send_init_ipi(apic_id: u8) { unsafe {
     // Write target APIC ID to high dword
     lapic_write(0x310, (apic_id as u32) << 24);
     // Write INIT command to low dword
     lapic_write(0x300, 0x4500); // INIT, level=assert, edge trigger
-}
+}}
 
 /// Send SIPI to an AP
-unsafe fn send_sipi(apic_id: u8, vector: u8) {
+unsafe fn send_sipi(apic_id: u8, vector: u8) { unsafe {
     lapic_write(0x310, (apic_id as u32) << 24); // target APIC ID
     lapic_write(0x300, 0x4600 | (vector as u32)); // SIPI, level=assert, vector
-}
+}}
 
 #[inline(always)]
 /// Get the current stack pointer from (RSP)

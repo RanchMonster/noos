@@ -1,12 +1,11 @@
 use core::slice;
 
-use alloc::vec::Vec;
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, MappedPageTable, Mapper, OffsetPageTable, Page, PageSize,
-        PageTable, PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, mapper,
+        FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page,
+        PageTable, PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB,
     },
 };
 
@@ -276,7 +275,7 @@ unsafe impl FrameAllocator<Size2MiB> for BitMapFrameAllocator {
             let start_frame = word_idx * 64 + bit;
 
             // Guard: 2 MiB frames must start at a 512-aligned boundary
-            if start_frame % 512 != 0 {
+            if !start_frame.is_multiple_of(512) {
                 continue;
             }
 
@@ -310,7 +309,7 @@ unsafe impl FrameAllocator<Size1GiB> for BitMapFrameAllocator {
 }
 
 impl FrameDeallocator<Size1GiB> for BitMapFrameAllocator {
-    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size1GiB>) {
+    unsafe fn deallocate_frame(&mut self, _frame: PhysFrame<Size1GiB>) {
         unimplemented!("1GiB deallocation not implemented")
     }
 }

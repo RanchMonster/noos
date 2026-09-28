@@ -40,6 +40,12 @@ impl TaskStack {
         TaskStack { top }
     }
 }
+
+impl Default for TaskStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl Drop for TaskStack {
     fn drop(&mut self) {
         unsafe {
@@ -161,7 +167,7 @@ impl Task {
         t.core_id = Some(core_id);
         t
     }
-    pub fn get_state<'task>(&'task self) -> &'task TaskState {
+    pub fn get_state(&self) -> &TaskState {
         let state_ptr = self.task_context.rbx as *mut TaskState;
         unsafe { &*state_ptr }
     }
@@ -223,9 +229,9 @@ pub unsafe fn switch_to_kernel_context() {
         let cpu_data = get_cpu_data();
         let mut opt = (*cpu_data.executor).current_task();
         let current_task = opt.as_mut().expect("No current task");
-        let mut kernel_ctx = *cpu_data.kernel_ctx; // deref the ptr so we can pass
+        let kernel_ctx = *cpu_data.kernel_ctx; // deref the ptr so we can pass
         // it as a reference (didn't need
         // to deref but it's cleaner)
-        switch_to_task_context(&mut current_task.task_context, &mut kernel_ctx);
+        switch_to_task_context(&mut current_task.task_context, &kernel_ctx);
     });
 }
