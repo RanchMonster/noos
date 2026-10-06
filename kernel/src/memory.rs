@@ -1,11 +1,12 @@
 use core::slice;
 
+use alloc::vec::Vec;
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page,
-        PageTable, PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB,
+        FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page, PageSize, PageTable,
+        PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB,
     },
 };
 
@@ -97,6 +98,14 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
         frame
     }
 }
+
+// rust-analyzer is being dumb about the formatting of these constants,
+// it might be a bug I don't feel like tracking it down right this instant.
+#[allow(non_upper_case_globals)]
+const NUMBER_OF_4KiB_PAGES_IN_2MiB: usize = (Size2MiB::SIZE / Size4KiB::SIZE) as usize;
+#[allow(non_upper_case_globals)]
+const NUMBER_OF_4KiB_PAGES_IN_1GiB: usize = (Size1GiB::SIZE / Size4KiB::SIZE) as usize;
+
 const BITMAP_START: usize = 0xffff_8000_1000_0000;
 pub struct BitMapFrameAllocator {
     bitmap: &'static mut [u64],
@@ -190,8 +199,11 @@ impl BitMapFrameAllocator {
     }
 
     /// Helper: Flips a sequential range of bits from 0 to 1 (allocated)
+    /// # Arguments
+    /// * `start_frame` - The start frame number
+    /// * `count` - The number of frames to flip
     fn mark_region_allocated(&mut self, start_frame: usize, count: usize) {
-        debug_assert!(
+        assert!(
             self.is_region_free(start_frame, count),
             "Allocated region overlaps with free region"
         ); // if I use this right, this should never happen (but just in case it doing a assertion
@@ -206,8 +218,13 @@ impl BitMapFrameAllocator {
             self.bitmap[word_idx] |= 1 << bit_idx;
         }
     }
+
+    /// Helper: Flips a sequential range of bits from 1 to 0 (free)
+    /// # Arguments
+    /// * `start_frame` - The start frame number
+    /// * `count` - The number of frames to flip
     fn mark_region_free(&mut self, start_frame: usize, count: usize) {
-        debug_assert!(
+        assert!(
             self.is_region_used(start_frame, count),
             "Free region overlaps with allocated region"
         ); // if I use this right, this should never happen (but just in case it doing a assertion
@@ -250,6 +267,7 @@ unsafe impl FrameAllocator<Size4KiB> for BitMapFrameAllocator {
         None
     }
 }
+
 impl FrameDeallocator<Size4KiB> for BitMapFrameAllocator {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
         let frame_index = frame.start_address().as_u64() / 4096;
@@ -260,6 +278,7 @@ impl FrameDeallocator<Size4KiB> for BitMapFrameAllocator {
         self.next_search_word = self.next_search_word.min(word_index);
     }
 }
+
 unsafe impl FrameAllocator<Size2MiB> for BitMapFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size2MiB>> {
         for word_idx in self.next_search_word..self.bitmap.len() {
@@ -274,20 +293,20 @@ unsafe impl FrameAllocator<Size2MiB> for BitMapFrameAllocator {
             let bit = (!word).trailing_zeros() as usize;
             let start_frame = word_idx * 64 + bit;
 
-            // Guard: 2 MiB frames must start at a 512-aligned boundary
-            if !start_frame.is_multiple_of(512) {
+            // Guard: 2 MiB frames must start at a NUMBER_OF_4KiB_PAGES_IN_2MiB-aligned boundary
+            if !start_frame.is_multiple_of(NUMBER_OF_4KiB_PAGES_IN_2MiB) {
                 continue;
             }
 
-            // Guard: Ensure all 512 bits starting here are completely free
+            // Guard: Ensure all NUMBER_OF_4KiB_PAGES_IN_2MiB bits starting here are completely free
             let out_of_bounds = word_idx >= self.bitmap.len();
-            if out_of_bounds || !self.is_region_free(start_frame, 512) {
+            if out_of_bounds || !self.is_region_free(start_frame, NUMBER_OF_4KiB_PAGES_IN_2MiB) {
                 continue;
             }
 
             // If we passed all guards, perform allocation and return
-            self.mark_region_allocated(start_frame, 512);
-            self.next_search_word = (start_frame + 512) / 64;
+            self.mark_region_allocated(start_frame, NUMBER_OF_4KiB_PAGES_IN_2MiB);
+            self.next_search_word = (start_frame + NUMBER_OF_4KiB_PAGES_IN_2MiB) / 64;
 
             let phys_addr = PhysAddr::new((start_frame * 4096) as u64);
             return Some(PhysFrame::containing_address(phys_addr));
@@ -296,20 +315,53 @@ unsafe impl FrameAllocator<Size2MiB> for BitMapFrameAllocator {
         None
     }
 }
+
 impl FrameDeallocator<Size2MiB> for BitMapFrameAllocator {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size2MiB>) {
-        let frame_index = (frame.start_address().as_u64() / 4096) as usize;
-        self.mark_region_free(frame_index, 512);
+        let frame_index = (frame.start_address().as_u64() / Size4KiB::SIZE) as usize;
+        self.mark_region_free(frame_index, NUMBER_OF_4KiB_PAGES_IN_2MiB);
+        todo!();
     }
 }
 unsafe impl FrameAllocator<Size1GiB> for BitMapFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size1GiB>> {
-        unimplemented!("1GiB allocation not implemented")
+        for word_idx in self.next_search_word..self.bitmap.len() {
+            let word = self.bitmap[word_idx];
+
+            // Guard: Skip fully allocated words immediately
+            if word == u64::MAX {
+                continue;
+            }
+
+            // Find the first free bit index (0 to 63)
+            let bit = (!word).trailing_zeros() as usize;
+            let start_frame = word_idx * 64 + bit;
+
+            // Guard: 2 MiB frames must start at a NUMBER_OF_4KiB_PAGES_IN_1GiB-aligned boundary
+            if !start_frame.is_multiple_of(NUMBER_OF_4KiB_PAGES_IN_1GiB) {
+                continue;
+            }
+
+            // Guard: Ensure all NUMBER_OF_4KiB_PAGES_IN_1GiB bits starting here are completely free
+            let out_of_bounds = word_idx >= self.bitmap.len();
+            if out_of_bounds || !self.is_region_free(start_frame, NUMBER_OF_4KiB_PAGES_IN_1GiB) {
+                continue;
+            }
+
+            // If we passed all guards, perform allocation and return
+            self.mark_region_allocated(start_frame, NUMBER_OF_4KiB_PAGES_IN_1GiB);
+            self.next_search_word = (start_frame + NUMBER_OF_4KiB_PAGES_IN_1GiB) / 64;
+
+            let phys_addr = PhysAddr::new((start_frame * 4096) as u64);
+            return Some(PhysFrame::containing_address(phys_addr));
+        }
+
+        None
     }
 }
 
 impl FrameDeallocator<Size1GiB> for BitMapFrameAllocator {
     unsafe fn deallocate_frame(&mut self, _frame: PhysFrame<Size1GiB>) {
-        unimplemented!("1GiB deallocation not implemented")
+        self.mark_region_free(0, NUMBER_OF_4KiB_PAGES_IN_1GiB)
     }
 }
