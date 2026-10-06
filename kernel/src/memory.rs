@@ -82,6 +82,7 @@ impl BootInfoFrameAllocator {
         // create `PhysFrame` types from the start addresses
         frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
     }
+
     fn max_physical_address(&self) -> u64 {
         self.memory_map
             .iter()
@@ -149,9 +150,10 @@ impl BitMapFrameAllocator {
         let bitmap = unsafe { slice::from_raw_parts_mut(BITMAP_START as *mut u64, bitmap_words) };
 
         // Start with all frames marked as used (all bits = 1)
-        for word in bitmap.iter_mut() {
-            *word = u64::MAX;
-        }
+        // So I was doing some testing and it seems like filling the bitmap with u64::MAX
+        // is what is actually causing the bitmap creation to take so long.
+        // I am going to try to find a way around this but it's kinda annoying.
+        bitmap.fill(u64::MAX);
 
         let total_used_frames = boot_info_frame_allocator.next;
 
