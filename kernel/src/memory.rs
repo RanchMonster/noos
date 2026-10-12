@@ -1,7 +1,7 @@
 mod bitmap_frame_allocator;
 mod buddy_allocator;
 mod fixed_size_block;
-
+mod formulas;
 use core::slice;
 
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
