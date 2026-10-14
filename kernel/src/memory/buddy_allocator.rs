@@ -1,13 +1,13 @@
-use bootloader_api::info::{MemoryRegion, MemoryRegionKind, MemoryRegions};
+use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use core::{alloc::Layout, ptr::NonNull};
 use x86_64::{
-    PhysAddr, VirtAddr,
+    PhysAddr,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, Page, PageSize, PhysFrame, Size1GiB, Size2MiB, Size4KiB,
+        FrameAllocator, FrameDeallocator, PageSize, PhysFrame, Size1GiB, Size2MiB, Size4KiB,
     },
 };
 
-use super::{Locked, bitmap_frame_allocator::BitMapFrameAllocator, formulas};
+use super::{bitmap_frame_allocator::BitMapFrameAllocator, formulas};
 
 const PAGE_SIZE: usize = 4096; // 4 KiB Base Page
 const HARD_MAX_ORDER: usize = 18; // Hard ceiling (1 GiB blocks)
@@ -168,9 +168,13 @@ impl BuddyAllocator {
             addr += block_size;
         }
     }
-    fn init(&mut self, memory_map: &'static [MemoryRegion], physical_offset: usize) {
+    pub fn init(&mut self, memory_map: &'static [MemoryRegion], physical_offset: usize) {
         self.physical_offset = physical_offset;
         self.bitmap_allocator.init(memory_map, physical_offset);
+        
+        for region in memory_map.iter().filter(|r| r.kind == MemoryRegionKind::Usable) {
+            self.map_region_to_order(*region);
+        }
     }
     fn get_node_of_order(&mut self, order: usize) -> Option<NonNull<ListNode>> {
         if let Some(node) = self.lists[order].pop() {
@@ -251,71 +255,43 @@ impl BuddyAllocator {
     /// Allocate a block of memory.
     /// This function will allocate a block of memory of the given size or closest order.
     pub fn alloc(&mut self, layout: Layout) -> Option<NonNull<u8>> {
-        let order = formulas::size_to_order(layout.size());
-        let size_of_node = formulas::order_to_size(order);
-        let node = self.get_node_of_order(order)?;
-
-        // To ensure we don't allow programs to steal each other's data we will clear the memory
-        let byte_ptr = node.as_ptr() as *mut u8;
-        for i in 0..size_of_node {
-            unsafe { byte_ptr.add(i).write_volatile(0) };
+        if layout.size() == 0 {
+            return Some(NonNull::<u8>::dangling());
         }
 
-        // Mark the region as allocated
+        let required_size = layout.size().max(layout.align());
+        let order = formulas::size_to_order(required_size);
+        let block_size = formulas::order_to_size(order);
+
+        let node = self.get_node_of_order(order)?;
+        let byte_ptr = node.as_ptr() as *mut u8;
+
+        unsafe { core::ptr::write_bytes(byte_ptr, 0, block_size); }
+
         let addr = node_addr(node);
         let frame = (addr - self.physical_offset) / PAGE_SIZE;
-        let total_number_of_pages = size_of_node / PAGE_SIZE;
-        self.bitmap_allocator
-            .mark_region_allocated(frame, total_number_of_pages);
+        let total_pages = block_size / PAGE_SIZE;
+        self.bitmap_allocator.mark_region_allocated(frame, total_pages);
 
-        let byte_ptr = node.as_ptr() as *mut u8;
-        let aligned_shift = byte_ptr.align_offset(layout.align());
-
-        if aligned_shift == usize::MAX || aligned_shift > size_of_node {
-            return None;
-        }
-
-        let aligned_size = size_of_node - aligned_shift;
-        assert!(
-            aligned_size % layout.align() == 0,
-            "The size of the allocated block must be a multiple of the alignment"
-        );
-        unsafe {
-            Some(NonNull::new_unchecked(
-                byte_ptr.add(aligned_shift) as *mut u8
-            ))
-        }
+        unsafe { Some(NonNull::new_unchecked(byte_ptr)) }
     }
     /// Deallocates a block of memory previously allocated by this allocator.
     /// # Safety
     /// This function is unsafe because it can cause undefined behavior if the given pointer is not
     /// a valid pointer to a block of memory previously allocated by this allocator.
     pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        let order = formulas::size_to_order(layout.size());
-        let size_of_node = formulas::order_to_size(order);
+        let required_size = layout.size().max(layout.align());
+        let order = formulas::size_to_order(required_size);
+        let block_size = formulas::order_to_size(order);
 
-        let page_containing_ptr: Page<Size4KiB> =
-            Page::containing_address(VirtAddr::new(ptr.as_ptr() as u64));
-
-        let start_addr = page_containing_ptr.start_address().as_u64() as usize;
-        let end_addr = start_addr + size_of_node;
-
-        assert!(
-            end_addr % PAGE_SIZE == 0,
-            "The end address must be page aligned"
-        );
-
-        let node = node_at!(start_addr);
-        unsafe {
-            (*node.as_ptr()).next = core::ptr::null_mut();
-            (*node.as_ptr()).prev = core::ptr::null_mut();
-        }
-
-        let frame_number = self.convert_to_phys_addr(node).as_u64() / PAGE_SIZE as u64;
-        self.lists[order].prepend(node);
-
-        self.bitmap_allocator
-            .mark_region_free(frame_number as usize, size_of_node / PAGE_SIZE);
+        let block_start = (ptr.as_ptr() as usize) & !(block_size - 1);
+        assert!(block_start % block_size == 0, "Pointer not aligned to block size");
+        let frame = (block_start - self.physical_offset) / PAGE_SIZE;
+        assert!(self.bitmap_allocator.is_region_used(frame, block_size / PAGE_SIZE), 
+                "Double-free or invalid pointer");
+        let node = node_at!(block_start);
+        self.put_node_of_order(node, order);
+        self.bitmap_allocator.mark_region_free(frame, block_size / PAGE_SIZE);
     }
 }
 
