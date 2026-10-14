@@ -44,15 +44,18 @@ struct DoubleLinkedList {
     length: usize,
 }
 impl DoubleLinkedList {
+    #[allow(dead_code)]
     pub const fn new() -> Self {
         DoubleLinkedList {
             head: core::ptr::null_mut(),
             length: 0,
         }
     }
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.head.is_null()
     }
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.length
     }
@@ -83,6 +86,10 @@ impl DoubleLinkedList {
         }
     }
 
+    /// # Safety
+    /// - `node` must be a valid pointer to a `ListNode` currently in this list
+    /// - The list must not be empty
+    /// - Caller must ensure no concurrent modification of the list
     unsafe fn remove(&mut self, node: NonNull<ListNode>) {
         let node_ptr = node.as_ptr();
         let prev;
@@ -111,7 +118,7 @@ impl DoubleLinkedList {
         self.length -= 1;
     }
 }
-/// The buddy allocator is the main allocator used by the kernel.
+/// The buddy allocator is the large region allocator for allocations exceeding fixed-size block capacity.
 /// for more information about what a buddy allocator is, check out
 /// https://en.wikipedia.org/wiki/Buddy_memory_allocation
 pub struct BuddyAllocator {
@@ -246,6 +253,7 @@ impl BuddyAllocator {
         self.lists[order].prepend(node);
     }
 
+    #[allow(dead_code)]
     fn convert_to_phys_addr(&self, node: NonNull<ListNode>) -> PhysAddr {
         let virt_addr = node_addr(node);
         let phys_addr = PhysAddr::new((virt_addr - self.physical_offset) as u64);
