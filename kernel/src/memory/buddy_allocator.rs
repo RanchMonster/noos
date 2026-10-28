@@ -27,7 +27,23 @@ const _: () = assert!(
 fn node_addr(node: NonNull<ListNode>) -> usize {
     node.as_ptr() as usize
 }
+/// Forces a Memory Region to align to given page size, adding to the start address,
+/// and/or cutting off some from the end.
+/// # Safety
+/// This function does not check that address are valid usable parts of memory or still within the
+/// region.
+const unsafe fn force_region_page_aligment(mut region: MemoryRegion) -> MemoryRegion {
+    assert!(region.start != region.end, "Region must not be zero sized");
+    let non_aligend_start = region.start;
+    let non_aligend_end = region.end;
 
+    let start_aligemnt_offset = non_aligend_start % PAGE_SIZE as u64;
+    let end_aligment_offset = non_aligend_end % PAGE_SIZE as u64;
+
+    region.start += start_aligemnt_offset;
+    region.end -= end_aligment_offset;
+    region
+}
 macro_rules! node_at {
     ($addr:expr) => {{
         let addr = $addr;
@@ -69,6 +85,7 @@ impl DoubleLinkedList {
             }
             self.head = node.as_ptr();
         }
+        self.length += 1;
     }
     pub fn pop(&mut self) -> Option<NonNull<ListNode>> {
         if self.head.is_null() {
@@ -140,11 +157,19 @@ impl BuddyAllocator {
         }
     }
     fn map_region_to_order(&mut self, region: MemoryRegion) {
+        use MemoryRegionKind::Usable;
+        assert!(matches!(region.kind, Usable), "Region is not useable");
+
+        // I should add safety checks here but I don't feel like it right now.
+        let region = unsafe { force_region_page_aligment(region) };
+
         let phys_start = region.start as usize;
         let phys_end = region.end as usize;
+
         assert!(
-            phys_start % PAGE_SIZE == 0 && phys_end % PAGE_SIZE == 0,
-            "Memory regions are not page aligned"
+            phys_start % PAGE_SIZE == 0,
+            "Memory regions are not page aligned\nregion:{:?}",
+            region
         );
 
         let mut addr = phys_start;
@@ -178,11 +203,15 @@ impl BuddyAllocator {
     pub fn init(&mut self, memory_map: &'static [MemoryRegion], physical_offset: usize) {
         self.physical_offset = physical_offset;
         self.bitmap_allocator.init(memory_map, physical_offset);
-        
-        for region in memory_map.iter().filter(|r| r.kind == MemoryRegionKind::Usable) {
+
+        for region in memory_map
+            .iter()
+            .filter(|r| r.kind == MemoryRegionKind::Usable)
+        {
             self.map_region_to_order(*region);
         }
     }
+
     fn get_node_of_order(&mut self, order: usize) -> Option<NonNull<ListNode>> {
         if let Some(node) = self.lists[order].pop() {
             return Some(node);
@@ -274,12 +303,15 @@ impl BuddyAllocator {
         let node = self.get_node_of_order(order)?;
         let byte_ptr = node.as_ptr() as *mut u8;
 
-        unsafe { core::ptr::write_bytes(byte_ptr, 0, block_size); }
+        unsafe {
+            core::ptr::write_bytes(byte_ptr, 0, block_size);
+        }
 
         let addr = node_addr(node);
         let frame = (addr - self.physical_offset) / PAGE_SIZE;
         let total_pages = block_size / PAGE_SIZE;
-        self.bitmap_allocator.mark_region_allocated(frame, total_pages);
+        self.bitmap_allocator
+            .mark_region_allocated(frame, total_pages);
 
         unsafe { Some(NonNull::new_unchecked(byte_ptr)) }
     }
@@ -293,13 +325,20 @@ impl BuddyAllocator {
         let block_size = formulas::order_to_size(order);
 
         let block_start = (ptr.as_ptr() as usize) & !(block_size - 1);
-        assert!(block_start % block_size == 0, "Pointer not aligned to block size");
+        assert!(
+            block_start % block_size == 0,
+            "Pointer not aligned to block size"
+        );
         let frame = (block_start - self.physical_offset) / PAGE_SIZE;
-        assert!(self.bitmap_allocator.is_region_used(frame, block_size / PAGE_SIZE), 
-                "Double-free or invalid pointer");
+        assert!(
+            self.bitmap_allocator
+                .is_region_used(frame, block_size / PAGE_SIZE),
+            "Double-free or invalid pointer"
+        );
         let node = node_at!(block_start);
         self.put_node_of_order(node, order);
-        self.bitmap_allocator.mark_region_free(frame, block_size / PAGE_SIZE);
+        self.bitmap_allocator
+            .mark_region_free(frame, block_size / PAGE_SIZE);
     }
 }
 
