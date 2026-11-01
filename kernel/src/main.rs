@@ -5,13 +5,10 @@
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
-
-use bootloader_api::{
-    BootInfo, BootloaderConfig,
-    entry_point,
-};
+use alloc::vec::Vec;
+use bootloader_api::{BootInfo, BootloaderConfig, entry_point};
 use core::panic::PanicInfo;
-use kernel::{memory::BitMapFrameAllocator, println};
+use kernel::{memory, println};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
@@ -22,23 +19,21 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 
 entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    use kernel::allocator;
-    use kernel::memory::{self, BootInfoFrameAllocator};
     use x86_64::VirtAddr;
     let physical_memory_offset = boot_info
         .physical_memory_offset
         .clone()
         .take()
         .expect("Physical memory offset not found");
-    let mut offset_page_tabe =
-        unsafe { memory::init(VirtAddr::new(physical_memory_offset)) };
-    let boot_info_frame_allocator =
-        unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
-    let mut bitmap_frame_allocator =
-        BitMapFrameAllocator::new(&mut offset_page_tabe, boot_info_frame_allocator);
-    allocator::init_heap(&mut offset_page_tabe, &mut bitmap_frame_allocator)
-        .expect("failed to initialize heap");
-    let _vga_buffer = boot_info.framebuffer.take().expect("no framebuffer");
+    // Init the kernel before we init memory or start running userspace programs
+    kernel::init();
+    // Init all system memory that can be used for heap
+    unsafe {
+        memory::init(
+            VirtAddr::new(physical_memory_offset),
+            &boot_info.memory_regions,
+        );
+    }
 
     #[cfg(test)]
     test_main();
