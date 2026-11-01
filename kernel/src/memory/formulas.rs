@@ -20,13 +20,15 @@ pub const fn size_to_order(size: usize) -> usize {
 
 pub const fn order_to_size(order: usize) -> usize {
     assert!(order <= MAX_ORDER, "order exceeds MAX_ORDER");
-    PAGE_SIZE.checked_shl(order as u32).expect("order_to_size overflow")
+    PAGE_SIZE
+        .checked_shl(order as u32)
+        .expect("order_to_size overflow")
 }
 
 pub const fn order_to_pages(order: usize) -> usize {
     1 << order
 }
-
+/// Calculates the number of pages required to hold the given size.
 pub const fn size_to_pages(size: usize) -> usize {
     (size + PAGE_SIZE - 1) / PAGE_SIZE
 }
